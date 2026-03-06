@@ -2,8 +2,17 @@ const { CostExplorerClient, GetCostAndUsageCommand } = require("@aws-sdk/client-
 const express = require("express");
 const router = express.Router();
 const ec2Client = require("../config/awsConfig");
-const { DescribeInstancesCommand } = require("@aws-sdk/client-ec2");
+const { DescribeInstancesCommand ,DescribeVolumesCommand } = require("@aws-sdk/client-ec2");
+const { CloudWatchClient, GetMetricStatisticsCommand } = require("@aws-sdk/client-cloudwatch");
 const db = require("../config/db");
+
+const cloudWatchClient = new CloudWatchClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY,
+    secretAccessKey: process.env.AWS_SECRET_KEY
+  }
+});
 
 router.get("/ec2", async (req, res) => {
   try {
@@ -342,4 +351,266 @@ router.get("/ec2/:instance_id", async (req, res) => {
   }
 });
 
+// GET /api/aws/waste-report
+router.get("/waste-report", async (req, res) => {
+  try {
+
+    const ec2Command = new DescribeInstancesCommand({});
+    const ec2Response = await ec2Client.send(ec2Command);
+
+    let idleInstances = [];
+
+    ec2Response.Reservations.forEach((reservation) => {
+      reservation.Instances.forEach((instance) => {
+        if (instance.State.Name === "stopped") {
+          idleInstances.push(instance);
+        }
+      });
+    });
+
+    const volumeCommand = new DescribeVolumesCommand({});
+    const volumeResponse = await ec2Client.send(volumeCommand);
+
+    const unusedVolumes = volumeResponse.Volumes.filter(
+      (volume) => !volume.Attachments || volume.Attachments.length === 0
+    );
+
+    res.json({
+      success: true,
+      idle_instances: idleInstances.length,
+      unused_volumes: unusedVolumes.length,
+      total_resources_wasting: idleInstances.length + unusedVolumes.length
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// GET /api/aws/optimization-score
+router.get("/optimization-score", async (req, res) => {
+  try {
+
+    const ec2Command = new DescribeInstancesCommand({});
+    const ec2Response = await ec2Client.send(ec2Command);
+
+    let idleInstances = [];
+
+    ec2Response.Reservations.forEach((reservation) => {
+      reservation.Instances.forEach((instance) => {
+        if (instance.State.Name === "stopped") {
+          idleInstances.push(instance);
+        }
+      });
+    });
+
+    const volumeCommand = new DescribeVolumesCommand({});
+    const volumeResponse = await ec2Client.send(volumeCommand);
+
+    const unusedVolumes = volumeResponse.Volumes.filter(
+      (volume) => !volume.Attachments || volume.Attachments.length === 0
+    );
+
+    const issues = idleInstances.length + unusedVolumes.length;
+
+    let score = 100 - issues * 10;
+
+    if (score < 0) score = 0;
+
+    res.json({
+      success: true,
+      optimization_score: score,
+      issues_detected: issues,
+      status: score > 80 ? "Good" : score > 50 ? "Average" : "Poor"
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// GET /api/aws/resource-summary
+router.get("/resource-summary", async (req, res) => {
+  try {
+
+    const ec2Command = new DescribeInstancesCommand({});
+    const ec2Response = await ec2Client.send(ec2Command);
+
+    let totalInstances = 0;
+    let runningInstances = 0;
+    let stoppedInstances = 0;
+
+    ec2Response.Reservations.forEach((reservation) => {
+      reservation.Instances.forEach((instance) => {
+        totalInstances++;
+
+        if (instance.State.Name === "running") runningInstances++;
+        if (instance.State.Name === "stopped") stoppedInstances++;
+      });
+    });
+
+    const volumeCommand = new DescribeVolumesCommand({});
+    const volumeResponse = await ec2Client.send(volumeCommand);
+
+    const unusedVolumes = volumeResponse.Volumes.filter(
+      (volume) => !volume.Attachments || volume.Attachments.length === 0
+    );
+
+    const issues = stoppedInstances + unusedVolumes.length;
+    let score = 100 - issues * 10;
+
+    if (score < 0) score = 0;
+
+    res.json({
+      success: true,
+      total_instances: totalInstances,
+      running_instances: runningInstances,
+      stopped_instances: stoppedInstances,
+      total_volumes: volumeResponse.Volumes.length,
+      unused_volumes: unusedVolumes.length,
+      optimization_score: score
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+
+// GET /api/aws/cost-estimate
+router.get("/cost-estimate", async (req, res) => {
+  try {
+
+    const ec2Command = new DescribeInstancesCommand({});
+    const ec2Response = await ec2Client.send(ec2Command);
+
+    let idleInstances = [];
+
+    ec2Response.Reservations.forEach((reservation) => {
+      reservation.Instances.forEach((instance) => {
+        if (instance.State.Name === "stopped") {
+          idleInstances.push(instance);
+        }
+      });
+    });
+
+    const volumeCommand = new DescribeVolumesCommand({});
+    const volumeResponse = await ec2Client.send(volumeCommand);
+
+    const unusedVolumes = volumeResponse.Volumes.filter(
+      (volume) => !volume.Attachments || volume.Attachments.length === 0
+    );
+
+    const idleInstanceCost = idleInstances.length * 8;   // approx $8/month per small EC2
+    const unusedStorageCost = unusedVolumes.length * 2;  // approx $2/month per small EBS
+
+    const totalWaste = idleInstanceCost + unusedStorageCost;
+
+    res.json({
+      success: true,
+      idle_instance_estimated_cost: idleInstanceCost,
+      unused_storage_estimated_cost: unusedStorageCost,
+      total_estimated_waste: totalWaste
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+// GET /api/aws/ec2-metrics
+router.get("/ec2-metrics/:instanceId", async (req, res) => {
+  try {
+
+    const instanceId = req.params.instanceId;
+
+    const params = {
+      Namespace: "AWS/EC2",
+      MetricName: "CPUUtilization",
+      Dimensions: [
+        {
+          Name: "InstanceId",
+          Value: instanceId
+        }
+      ],
+      StartTime: new Date(Date.now() - 60 * 60 * 1000), // last 1 hour
+      EndTime: new Date(),
+      Period: 300,
+      Statistics: ["Average"]
+    };
+
+    const command = new GetMetricStatisticsCommand(params);
+    const response = await cloudWatchClient.send(command);
+
+    res.json({
+      success: true,
+      instance_id: instanceId,
+      datapoints: response.Datapoints
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
+// GET /api/aws/smart-idle-instances
+router.get("/smart-idle-instances/:instanceId", async (req, res) => {
+  try {
+
+    const instanceId = req.params.instanceId;
+
+    const params = {
+      Namespace: "AWS/EC2",
+      MetricName: "CPUUtilization",
+      Dimensions: [
+        {
+          Name: "InstanceId",
+          Value: instanceId
+        }
+      ],
+      StartTime: new Date(Date.now() - 60 * 60 * 1000),
+      EndTime: new Date(),
+      Period: 300,
+      Statistics: ["Average"]
+    };
+
+    const command = new GetMetricStatisticsCommand(params);
+    const response = await cloudWatchClient.send(command);
+
+    let idle = false;
+    let avgCpu = 0;
+
+    if (response.Datapoints.length > 0) {
+      avgCpu = response.Datapoints[0].Average;
+      if (avgCpu < 5) {
+        idle = true;
+      }
+    }
+
+    res.json({
+      success: true,
+      instance_id: instanceId,
+      average_cpu: avgCpu,
+      idle_instance: idle
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+});
 module.exports = router;

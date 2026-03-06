@@ -5,6 +5,9 @@ require("dotenv").config();
 const authRoutes = require("./routes/authRoutes");
 const verifyToken = require("./middleware/authMiddleware");
 const ec2Routes = require("./routes/ec2Routes");
+const ebsRoutes = require("./routes/ebsRoutes");
+const rdsRoutes = require("./routes/rdsRoutes");
+
 const pool = require("./config/db");
 
 const app = express();
@@ -14,6 +17,9 @@ app.use(express.json());
 
 app.use("/api/auth", authRoutes);
 app.use("/api/aws", ec2Routes);
+app.use("/api/aws", ebsRoutes);
+app.use("/api/aws", rdsRoutes);
+
 app.get("/api/protected", verifyToken, (req, res) => {
   res.json({
     message: "Protected route accessed successfully 🔐",
