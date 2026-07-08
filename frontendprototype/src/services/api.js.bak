@@ -1,0 +1,140 @@
+import axios from 'axios';
+
+// Mock Data Storage
+const MOCK_DATA = {
+  '/api/auth/login': {
+    token: "jwt_token_here_dummy",
+    user: { id: "123", name: "Cloud Sage Admin", email: "admin@cloudsage.com" }
+  },
+  '/api/dashboard/summary': {
+    totalCost: 5200,
+    runningInstances: 6,
+    stoppedInstances: 2,
+    totalStorage: "120GB",
+    idleResources: 3
+  },
+  '/api/ec2': [
+    { instanceId: "i-12345", instanceType: "t2.micro", state: "running", region: "ap-south-1", launchTime: "2024-03-10", cpuUtilization: 3 },
+    { instanceId: "i-67890", instanceType: "m5.large", state: "stopped", region: "us-east-1", launchTime: "2024-02-01", cpuUtilization: 0 },
+    { instanceId: "i-98765", instanceType: "t3.medium", state: "running", region: "eu-central-1", launchTime: "2024-04-12", cpuUtilization: 45 }
+  ],
+  '/api/ec2/idle': [
+    { instanceId: "i-12345", cpuUtilization: 2, estimatedSavings: "$20/month" }
+  ],
+  '/api/rds': [
+    { dbIdentifier: "customer-db", engine: "mysql", status: "available", storage: "20GB", region: "ap-south-1" },
+    { dbIdentifier: "analytics-db", engine: "postgres", status: "stopped", storage: "100GB", region: "us-east-1" }
+  ],
+  '/api/s3': [
+    { bucketName: "user-uploads", region: "ap-south-1", size: "5GB", objects: 1200, publicAccess: false },
+    { bucketName: "public-assets", region: "us-east-1", size: "20GB", objects: 5400, publicAccess: true }
+  ],
+  '/api/vpc': [
+    { vpcId: "vpc-01a2b3c4d5e", name: "Production-VPC", region: "us-east-1", cidr: "10.0.0.0/16", privateSubnets: 4, publicSubnets: 2, connectedEc2s: ["frontend-prod", "backend-api", "worker-node"] },
+    { vpcId: "vpc-9876543210a", name: "Staging-VPC", region: "eu-central-1", cidr: "172.31.0.0/16", privateSubnets: 2, publicSubnets: 1, connectedEc2s: ["staging-web", "staging-db"] },
+    { vpcId: "vpc-3f4e5d6c7b8", name: "Testing-VPC", region: "ap-south-1", cidr: "192.168.0.0/24", privateSubnets: 1, publicSubnets: 1, connectedEc2s: ["test-runner", "test-db"] },
+    { vpcId: "vpc-8a7b6c5d4e3", name: "Data-Lake-VPC", region: "us-west-2", cidr: "10.1.0.0/16", privateSubnets: 6, publicSubnets: 0, connectedEc2s: ["spark-cluster", "hadoop-master"] },
+    { vpcId: "vpc-ab12cd34ef5", name: "DevOps-VPC", region: "eu-west-1", cidr: "10.2.0.0/16", privateSubnets: 2, publicSubnets: 2, connectedEc2s: ["jenkins-server", "gitlab-runner"] },
+  ],
+  '/api/services': [
+    { serviceName: "AWS Lambda", status: "Healthy", activeInstances: "24 functions", usage: "1.2M Invocations" },
+    { serviceName: "Amazon Route53", status: "Healthy", activeInstances: "5 Hosted Zones", usage: "3000 Queries/day" },
+    { serviceName: "Amazon SQS", status: "Healthy", activeInstances: "12 Queues", usage: "450k Messages/day" },
+    { serviceName: "Amazon SNS", status: "Warning", activeInstances: "8 Topics", usage: "250k Messages/day" },
+    { serviceName: "Amazon CloudFront", status: "Healthy", activeInstances: "2 Distributions", usage: "45GB Data Transfer" },
+    { serviceName: "Amazon DynamoDB", status: "Healthy", activeInstances: "4 Tables", usage: "5.5GB Storage" },
+    { serviceName: "Elastic Load Balancer", status: "Error", activeInstances: "2 ALBs", usage: "1.5M Requests/day" },
+    { serviceName: "Amazon ECS", status: "Healthy", activeInstances: "3 Clusters", usage: "18 Services" },
+    { serviceName: "AWS KMS", status: "Healthy", activeInstances: "12 Keys", usage: "15k Requests/hour" },
+    { serviceName: "Amazon ElastiCache", status: "Healthy", activeInstances: "2 Clusters", usage: "85% Memory" },
+  ],
+  '/api/costs': { dailyCost: 120, monthlyCost: 4500, currency: "INR" },
+  '/api/costs/services': [
+    { service: "EC2", cost: 2000 },
+    { service: "RDS", cost: 1200 },
+    { service: "S3", cost: 300 },
+    { service: "CloudWatch", cost: 200 }
+  ],
+  '/api/costs/trend': [
+    { date: "2024-03-01", cost: 120 },
+    { date: "2024-03-02", cost: 110 },
+    { date: "2024-03-03", cost: 140 },
+    { date: "2024-03-04", cost: 135 },
+    { date: "2024-03-05", cost: 150 },
+  ],
+  '/api/metrics': { cpu: 35, memory: 60, network: "2GB", disk: "50GB" },
+  '/api/recommendations': [
+    { type: "EC2", message: "Stop idle instance i-12345", saving: "$25/month" },
+    { type: "Storage", message: "Delete unused S3 bucket logs", saving: "$10/month" },
+    { type: "RDS", message: "Downsize analytics-db", saving: "$40/month" }
+  ],
+  '/api/costs/forecast': { nextMonth: 5200, currency: "INR" },
+  '/api/alerts': [
+    { type: "Cost", message: "Monthly cost exceeded ₹4000" },
+    { type: "Resource", message: "3 idle EC2 instances detected" }
+  ]
+};
+
+// Create a custom axios instance
+const api = axios.create({
+  baseURL: '/',
+  timeout: 5000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Request interceptor: attach token
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Mock Interceptor: simulates API responses for the frontend
+api.interceptors.request.use((config) => {
+  // We deliberately throw an error with special mock payload so 
+  // the response interceptor can catch it and return it as real data.
+  // This avoids actually sending the network request to a non-existent backend.
+  const mockData = MOCK_DATA[config.url];
+  if (mockData !== undefined) {
+    // delay to simulate network
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        reject({
+          isMock: true,
+          status: 200,
+          data: mockData,
+        });
+      }, 400); // 400ms delay
+    });
+  }
+  return config;
+});
+
+// Response interceptor: unwraps our mock payload
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    // Intercept our mock object
+    if (error && error.isMock) {
+      return Promise.resolve({
+        data: error.data,
+        status: error.status,
+      });
+    }
+    // Handle true errors
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;

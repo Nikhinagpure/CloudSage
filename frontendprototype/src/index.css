@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@layer base {
+  :root, .dark {
+    --background: #111827; /* Rich dark navy background, slate-900 */
+    --foreground: #f8fafc; /* Slate 50 */
+    --primary: #3b82f6; /* Blue 500 */
+    --primary-foreground: #ffffff;
+    --card: #1f2937; /* Lighter navy for cards, slate-800 */
+    --card-foreground: #f8fafc;
+    --border: #374151; /* Subtle border, slate-700 */
+    --muted: #374151; /* Matches border for generic muted background */
+    --muted-foreground: #9ca3af; /* Slate 400 */
+    --accent: #374151; /* hover */
+    --accent-foreground: #f8fafc;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased transition-colors duration-300;
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-white/60 backdrop-blur-lg border border-white/20 dark:bg-slate-900/60 dark:border-slate-800/50 shadow-sm ring-1 ring-slate-900/5 dark:ring-white/10;
+  }
+  .glass-card {
+    @apply bg-white/80 backdrop-blur-xl border border-white/40 shadow-xl dark:bg-slate-900/80 dark:border-slate-800/50;
+  }
+}
